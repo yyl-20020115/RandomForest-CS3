@@ -1,150 +1,149 @@
 using System;
 using System.Collections.Generic;
 
-namespace MachineLearning 
+namespace MachineLearning; 
+
+public class RandomForest 
 {
-    class RandomForest 
+    private readonly List<RandomTree> forest = [];
+    private readonly double forestError = 1.0;
+
+    public RandomForest(string dataSource)  
     {
-        List<RandomTree> forest = new List<RandomTree>();
-        double forestError = 1.0;
+        var dataSet = new DataSet(dataSource);
 
-        public RandomForest(string dataSource)  
+        const int numTrees = 5;
+
+        List<RandomTree> bestForest = [];
+        double bestForestError = 1.0;
+
+        //iterates through all total number of random columns to use to find the one that produces the most accurate results
+        for (int numCols = 1; numCols < dataSet.GetNumCol() - 1; numCols++) 
         {
-            DataSet dataSet = new DataSet(dataSource);
+            this.forest.Clear();
 
-            const int numTrees = 5;
+            var outOfBagDataSet = new DataSet(dataSet.CloneData());
 
-            List<RandomTree> bestForest = new List<RandomTree>();
-            double bestForestError = 1.0;
-
-            //iterates through all total number of random columns to use to find the one that produces the most accurate results
-            for (int numCols = 1; numCols < dataSet.GetNumCol() - 1; numCols++) 
+            for (int i = 0; i < numTrees; i++) 
             {
-                this.forest.Clear();
+                (DataSet bootStrappedDataSet, DataSet tempOutOfBagDataSet) = dataSet.CreateBootstrapedDataSet();
+                this.forest.Add(new RandomTree(bootStrappedDataSet, numCols));
 
-                DataSet outOfBagDataSet = new DataSet(dataSet.CloneData());
-
-                for (int i = 0; i < numTrees; i++) 
-                {
-                    (DataSet bootStrappedDataSet, DataSet tempOutOfBagDataSet) = dataSet.CreateBootstrapedDataSet();
-                    this.forest.Add(new RandomTree(bootStrappedDataSet, numCols));
-
-                    outOfBagDataSet = new DataSet(outOfBagDataSet.CloneData(rowToRemove : outOfBagDataSet.CompareDataSets(tempOutOfBagDataSet)));
-                }
-
-                this.forestError = CalculateOutOfBagError(outOfBagDataSet);
-
-                //keeps the forest with the lowest out of bag error
-                if (this.forestError < bestForestError) 
-                {
-                    bestForest.Clear();
-
-                    bestForestError = forestError;
-
-                    foreach (RandomTree tree in this.forest) 
-                    {
-                        bestForest.Add(tree);
-                    }
-                }
+                outOfBagDataSet = new DataSet(outOfBagDataSet.CloneData(rowToRemove : outOfBagDataSet.CompareDataSets(tempOutOfBagDataSet)));
             }
 
-            if (bestForest.Count > 0) 
-            {
-                this.forest.Clear();
+            this.forestError = CalculateOutOfBagError(outOfBagDataSet);
 
-                //assigns the forest with the lowest error
-                foreach (RandomTree tree in bestForest) 
+            //keeps the forest with the lowest out of bag error
+            if (this.forestError < bestForestError) 
+            {
+                bestForest.Clear();
+
+                bestForestError = forestError;
+
+                foreach (RandomTree tree in this.forest) 
                 {
-                    this.forest.Add(tree);
+                    bestForest.Add(tree);
                 }
             }
-            
-
-            Console.WriteLine(@"Out of bag error : {0}%", forestError * 100);
-            Console.WriteLine();
         }
 
-        public string GetDecision(string[] entryInput) 
+        if (bestForest.Count > 0) 
         {
-            Dictionary<string, int> results = new Dictionary<string, int>();
+            this.forest.Clear();
 
-            foreach (RandomTree tree in this.forest) 
+            //assigns the forest with the lowest error
+            foreach (RandomTree tree in bestForest) 
             {
-                string treeDecision = tree.GetDecision(entryInput);
-
-                if (results.ContainsKey(treeDecision)) 
-                {
-                    results[treeDecision]++;
-                }
-                else 
-                {
-                    results.Add(treeDecision, 1);
-                }
+                this.forest.Add(tree);
             }
+        }
+        
 
-            string decision = "";
-            int bestScore = 0;
+        Console.WriteLine(@"Out of bag error : {0}%", forestError * 100);
+        Console.WriteLine();
+    }
 
-            foreach (KeyValuePair<string, int> vote in results) 
+    public string GetDecision(string[] entryInput) 
+    {
+        Dictionary<string, int> results = [];
+
+        foreach (RandomTree tree in this.forest) 
+        {
+            var treeDecision = tree.GetDecision(entryInput);
+
+            if (results.TryGetValue(treeDecision, out int value))
             {
-                if (vote.Value > bestScore) 
-                {
-                    bestScore = vote.Value;
-                    decision = vote.Key;
-                }
+                results[treeDecision] = ++value;
             }
-
-            return decision;
+            else 
+            {
+                results.Add(treeDecision, 1);
+            }
         }
 
-        private double CalculateOutOfBagError(DataSet outOfBagDataSet) 
+        var decision = "";
+        var bestScore = 0;
+
+        foreach (var vote in results) 
         {
-            //calculates the out of bag error for the random forest
-            double outOfBagError = 0;
-
-            if (outOfBagDataSet.GetNumEntries() > 0)
+            if (vote.Value > bestScore) 
             {
-                //splits out of bag data into results and data
-                List<string[]> outOfBagData = new List<string[]>();
-                List<string> results = new List<string>();
+                bestScore = vote.Value;
+                decision = vote.Key;
+            }
+        }
 
-                for (int entryIndex = 0; entryIndex < outOfBagDataSet.GetNumEntries(); entryIndex++) 
+        return decision;
+    }
+
+    private double CalculateOutOfBagError(DataSet outOfBagDataSet) 
+    {
+        //calculates the out of bag error for the random forest
+        double outOfBagError = 0;
+
+        if (outOfBagDataSet.GetNumEntries() > 0)
+        {
+            //splits out of bag data into results and data
+            List<string[]> outOfBagData = [];
+            List<string> results = [];
+
+            for (int entryIndex = 0; entryIndex < outOfBagDataSet.GetNumEntries(); entryIndex++) 
+            {
+                var entry = outOfBagDataSet.GetEntry(entryIndex);
+                var data = new string[entry.Length - 1];
+
+                for (int i = 0; i < entry.Length; i++) 
                 {
-                    string[] entry = outOfBagDataSet.GetEntry(entryIndex);
-                    string[] data = new string[entry.Length - 1];
-
-                    for (int i = 0; i < entry.Length; i++) 
+                    if (i < entry.Length - 1) 
                     {
-                        if (i < entry.Length - 1) 
-                        {
-                            data[i] = entry[i];
-                        }
-                        else 
-                        {
-                            //takes last column in entry as the result
-                            results.Add(entry[i]);
-                        }
+                        data[i] = entry[i];
                     }
-
-                    outOfBagData.Add(data);
-                }
-
-                //gets the random forests decision and compares it the expected result for each set of data
-                int numCorrect = 0;
-
-                for (int outOfBagIndex = 0; outOfBagIndex < outOfBagData.Count; outOfBagIndex++) 
-                {
-                    if (this.GetDecision(outOfBagData[outOfBagIndex]) == results[outOfBagIndex]) 
+                    else 
                     {
-                        numCorrect++;
+                        //takes last column in entry as the result
+                        results.Add(entry[i]);
                     }
                 }
 
-                //calculates error
-                outOfBagError = 1.0 - (double)numCorrect / (double)outOfBagData.Count;
+                outOfBagData.Add(data);
             }
 
-            return outOfBagError;
+            //gets the random forests decision and compares it the expected result for each set of data
+            int numCorrect = 0;
+
+            for (int outOfBagIndex = 0; outOfBagIndex < outOfBagData.Count; outOfBagIndex++) 
+            {
+                if (this.GetDecision(outOfBagData[outOfBagIndex]) == results[outOfBagIndex]) 
+                {
+                    numCorrect++;
+                }
+            }
+
+            //calculates error
+            outOfBagError = 1.0 - (double)numCorrect / (double)outOfBagData.Count;
         }
+
+        return outOfBagError;
     }
 }
